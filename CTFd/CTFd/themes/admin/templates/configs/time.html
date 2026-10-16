@@ -1,0 +1,100 @@
+{% macro render_time_config(place, description, timestamp) %}
+	<div class="row" id="{{ place }}-date-fields">
+		<div class="col-md-12">
+			<p>{{ description }}</p>
+		</div>
+
+		<div class="form-group col-md-12">
+			<label for="{{ place }}-datetime">Date and Time:</label>
+			<input class="form-control {{ place }}-date" id="{{ place }}-datetime" type="datetime-local" step="1">
+			<small class="form-text text-muted">
+				This value is interpreted using your browser's local timezone.
+			</small>
+		</div>
+
+		{{ caller() }}
+
+		<div class="form-group col-md-12">
+			<label for="{{ place }}-local">Local Time:</label>
+			<input class="form-control" id="{{ place }}-local" type="text" readonly>
+		</div>
+
+		<div class="form-group col-md-12">
+			<label for="{{ place }}-timezone">Timezone:</label>
+			<select class="form-control custom-select {{ place }}-date" id="{{ place }}-timezone">
+			</select>
+			<small class="form-text text-muted">
+				Changing this only updates the preview below.
+			</small>
+		</div>
+
+		<div class="form-group col-md-12">
+			<label for="{{ place }}-zonetime">Timezone Preview:</label>
+			<input class="form-control" id="{{ place }}-zonetime" type="text" readonly>
+		</div>
+
+		<div class="form-group col-md-12">
+			<label for="{{ place }}">UTC Timestamp:</label>
+			<input class="form-control" id="{{ place }}" name="{{ place }}" type="number"
+				{% if timestamp is defined and timestamp != None %}value="{{ timestamp }}"{% endif %} readonly>
+		</div>
+	</div>
+{% endmacro %}
+
+<div role="tabpanel" class="tab-pane config-section" id="ctftime">
+	<form method="POST" autocomplete="off" class="w-100">
+		<p>
+			Enter timings using your browser's local timezone. Use the Timezone dropdown to preview
+			the selected time in another timezone.
+		</p>
+
+		<ul class="nav nav-tabs mb-3">
+			<li class="nav-item">
+				<a class="nav-link active" href="#start-date" aria-controls="start-date" role="tab" data-toggle="tab">
+					Start Time
+				</a>
+			</li>
+			<li class="nav-item">
+				<a class="nav-link" href="#end-date" aria-controls="end-date" role="tab" data-toggle="tab">
+					End Time
+				</a>
+			</li>
+			<li class="nav-item">
+				<a class="nav-link" href="#freeze-date" aria-controls="freeze-date" role="tab" data-toggle="tab">
+					Freeze Time
+				</a>
+			</li>
+		</ul>
+
+		<div class="tab-content">
+			<div role="tabpanel" class="tab-pane active" id="start-date">
+				{% call render_time_config("start", "This is the time when the competition will begin. Challenges will automatically unlock and users will be able to submit answers.", start) %}
+				{% endcall %}
+			</div>
+
+			<div role="tabpanel" class="tab-pane" id="end-date">
+				{% call render_time_config("end", "This is the time when the competition will end. Challenges will automatically close and users won't be able to submit answers.", end) %}
+					<div class="form-group col-md-12">
+						<div class="form-check pl-0">
+							<label>
+								<input id="view_after_ctf" name="view_after_ctf" type="checkbox" {% if view_after_ctf %}checked{% endif %}>
+								View After CTF
+								<small class="form-text text-muted">
+									Allows challenges to be viewed after the End Time, however no new submissions will be recorded.<br>
+									For participants to be able to submit after End Time but not alter the scoreboard, configure Freeze Time to be your End Time.
+								</small>
+							</label>
+						</div>
+					</div>
+				{% endcall %}
+			</div>
+
+			<div role="tabpanel" class="tab-pane" id="freeze-date">
+				{% call render_time_config("freeze", "Freeze time specifies the timestamp that the competition will be frozen to. All solves before the freeze time will be shown, but new solves won't be shown to users.", freeze) %}
+				{% endcall %}
+			</div>
+		</div>
+
+		<button type="submit" class="btn btn-md btn-primary float-right">Update</button>
+	</form>
+</div>

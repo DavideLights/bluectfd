@@ -1,0 +1,131 @@
+{% extends "admin/challenges/create.html" %}
+
+{% block header %}
+<link rel="stylesheet" href="{{ url_for('blueagent.static', filename='blueagent.css') }}">
+<div class="alert alert-info" role="alert">
+    <strong>BlueAgent Cyber-Defense Patch Challenge:</strong>
+    Upload your Infrastructure-as-Code (IaC) topology YAML/JSON. BlueAgent automatically provisions per-team WireGuard tunnels, container bridges, and performs isolated exploit verification tests in dark OVN sandboxes.
+</div>
+{% endblock %}
+
+{% block value %}
+{{ super() }}
+
+<ul class="nav nav-tabs mt-4" id="blueagentCreateTabs" role="tablist">
+    <li class="nav-item">
+        <a class="nav-link active" id="tab-spec-link" data-toggle="tab" href="#tab-spec" role="tab">IaC Topology Spec</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" id="tab-preview-link" data-toggle="tab" href="#tab-preview" role="tab">Parsed Preview</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" id="tab-rules-link" data-toggle="tab" href="#tab-rules" role="tab">Defense Rules & Flags</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" id="tab-image-link" data-toggle="tab" href="#tab-image" role="tab">Distrobuilder Image</a>
+    </li>
+</ul>
+
+<div class="tab-content blueagent-tab-content mb-4" id="blueagentCreateTabContent">
+    <!-- Tab 1: Spec Upload / Paste -->
+    <div class="tab-pane fade show active" id="tab-spec" role="tabpanel">
+        <div class="form-group mt-3">
+            <label for="spec_file">Upload Challenge Config File (.yaml / .json)<br>
+                <small class="form-text text-muted">Upload your BlueAgent ChallengeConfig specification.</small>
+            </label>
+            <input type="file" class="form-control-file" id="spec_file" name="spec_file" accept=".yaml,.yml,.json">
+        </div>
+        <div class="form-group">
+            <label for="spec_text">Or Paste Specification YAML / JSON<br>
+                <small class="form-text text-muted">Supports placeholders like <code>&#123;&#123;team_k&#125;&#125;</code>, <code>&#123;&#123;subnet&#125;&#125;</code>, <code>&#123;&#123;ip:web&#125;&#125;</code>.</small>
+            </label>
+            <textarea class="form-control font-monospace" id="spec_text" name="spec_text" rows="12" placeholder="{% raw %}challenge_id: my-patch-challenge
+verifier:
+  image: curlimages/curl:latest
+  ip_suffix: 250
+containers:
+  - name: web
+    image: alpine-3.20-nginx
+    ip_suffix: 10
+    limits_memory: 256MB
+readiness_commands:
+  - target: container
+    container_name: web
+    cmd: ['pgrep', 'nginx']
+    timeout: 5
+    interval: 2
+    retry_timeout: 15
+verify_commands:
+  - target: verifier
+    cmd: ['curl', '-sf', 'http://{{ip:web}}/login']
+    timeout: 10{% endraw %}"></textarea>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" id="btn-validate-spec">Validate & Preview Topology</button>
+        <span id="spec-validation-feedback" class="ml-2 font-weight-bold"></span>
+    </div>
+
+    <!-- Tab 2: Parsed Preview -->
+    <div class="tab-pane fade" id="tab-preview" role="tabpanel">
+        <h5 class="mt-3">Containers Topology</h5>
+        <table class="table table-sm table-bordered blueagent-target-table" id="preview-containers-table">
+            <thead>
+                <tr>
+                    <th>Container Name</th>
+                    <th>Base Image</th>
+                    <th>IP Address</th>
+                    <th>Memory</th>
+                    <th>CPU</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td colspan="5" class="text-center text-muted">Click 'Validate & Preview Topology' to inspect parsed containers.</td></tr>
+            </tbody>
+        </table>
+        <div id="preview-probes-summary" class="mt-2 text-muted"></div>
+    </div>
+
+    <!-- Tab 3: Defense Rules & Flags -->
+    <div class="tab-pane fade" id="tab-rules" role="tabpanel">
+        <div class="form-group form-check mt-3">
+            <input type="checkbox" class="form-check-input" id="auto_deploy" name="auto_deploy" value="true" checked>
+            <label class="form-check-label" for="auto_deploy">Auto-Deploy Containers on VPN Download / Start</label>
+        </div>
+        <div class="form-group form-check">
+            <input type="checkbox" class="form-check-input" id="show_verify_details" name="show_verify_details" value="true">
+            <label class="form-check-label" for="show_verify_details">Show stdout/stderr to players on verification failure (diagnostic mode)</label>
+        </div>
+        <div class="form-group">
+            <label for="verify_cooldown">Verification Cooldown (seconds)<br>
+                <small class="form-text text-muted">Minimum seconds between verification tests per team (prevents spam).</small>
+            </label>
+            <input type="number" class="form-control" id="verify_cooldown" name="verify_cooldown" value="30" min="5" max="600">
+        </div>
+        <hr>
+        <div class="form-group form-check">
+            <input type="checkbox" class="form-check-input" id="allow_flag_fallback" name="allow_flag_fallback" value="true">
+            <label class="form-check-label" for="allow_flag_fallback">Enable Static Flag Fallback (allows standard manual flag input)</label>
+        </div>
+        <div class="form-group" id="static_flag_group" style="display: none;">
+            <label for="flag">Static Secret Flag (Optional)<br>
+                <small class="form-text text-muted">If static flag fallback is enabled, players can optionally submit this string.</small>
+            </label>
+            <input type="text" class="form-control" id="flag" name="flag" placeholder="flag{sample_flag}">
+        </div>
+    </div>
+
+    <!-- Tab 4: Distrobuilder Image Upload -->
+    <div class="tab-pane fade" id="tab-image" role="tabpanel">
+        <p class="text-muted mt-3">Optionally upload a new Distrobuilder YAML definition to build a custom container image on BlueAgent.</p>
+        <div class="form-group">
+            <label for="distrobuilder_file">Distrobuilder YAML File (.yaml)<br>
+                <small class="form-text text-muted">Submits to BlueAgent <code>POST /images</code> for asynchronous background build.</small>
+            </label>
+            <input type="file" class="form-control-file" id="distrobuilder_file" name="distrobuilder_file" accept=".yaml,.yml">
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block type %}
+<input type="hidden" value="blueagent_patch" name="type" id="chaltype">
+{% endblock %}

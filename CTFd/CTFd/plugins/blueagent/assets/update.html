@@ -1,0 +1,94 @@
+{% extends "admin/challenges/update.html" %}
+
+{% block header %}
+<link rel="stylesheet" href="{{ url_for('blueagent.static', filename='blueagent.css') }}">
+<div class="alert alert-info" role="alert">
+    <strong>BlueAgent Cyber-Defense Patch Challenge (ID: {{ challenge.id }}):</strong>
+    Modify challenge parameters or upload an updated specification. Changes to containers may require redeploying running team instances.
+</div>
+{% endblock %}
+
+{% block value %}
+{{ super() }}
+
+<ul class="nav nav-tabs mt-4" id="blueagentUpdateTabs" role="tablist">
+    <li class="nav-item">
+        <a class="nav-link active" id="tab-update-spec-link" data-toggle="tab" href="#tab-update-spec" role="tab">IaC Spec</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" id="tab-update-preview-link" data-toggle="tab" href="#tab-update-preview" role="tab">Topology Preview</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" id="tab-update-rules-link" data-toggle="tab" href="#tab-update-rules" role="tab">Defense Rules</a>
+    </li>
+</ul>
+
+<div class="tab-content blueagent-tab-content mb-4" id="blueagentUpdateTabContent">
+    <!-- Tab 1: Spec Content -->
+    <div class="tab-pane fade show active" id="tab-update-spec" role="tabpanel">
+        <div class="form-group mt-3">
+            <label for="spec_file">Replace Specification File (.yaml / .json)<br>
+                <small class="form-text text-muted">Leave empty to preserve existing specification.</small>
+            </label>
+            <input type="file" class="form-control-file" id="spec_file" name="spec_file" accept=".yaml,.yml,.json">
+        </div>
+        <div class="form-group">
+            <label for="spec_text">Specification Content<br>
+                <small class="form-text text-muted">Format: <code>{{ challenge.spec_format|upper }}</code></small>
+            </label>
+            <textarea class="form-control font-monospace" id="spec_text" name="spec_text" rows="12">{{ challenge.spec_raw }}</textarea>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" id="btn-validate-spec">Validate & Preview Topology</button>
+        <span id="spec-validation-feedback" class="ml-2 font-weight-bold"></span>
+    </div>
+
+    <!-- Tab 2: Topology Preview -->
+    <div class="tab-pane fade" id="tab-update-preview" role="tabpanel">
+        <h5>Containers Topology</h5>
+        <table class="table table-sm table-bordered blueagent-target-table" id="preview-containers-table">
+            <thead>
+                <tr>
+                    <th>Container Name</th>
+                    <th>Base Image</th>
+                    <th>IP Address</th>
+                    <th>Memory</th>
+                    <th>CPU</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in challenge.parsed_spec.get('containers', []) %}
+                <tr>
+                    <td>{{ c.name }}</td>
+                    <td>{{ c.image }}</td>
+                    <td><code>10.&#123;&#123;team_k&#125;&#125;.1.{{ c.ip_suffix }}</code></td>
+                    <td>{{ c.limits_memory or '256MB' }}</td>
+                    <td>{{ c.limits_cpu or '1' }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="text-center text-muted">No containers defined.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Tab 3: Defense Rules -->
+    <div class="tab-pane fade" id="tab-update-rules" role="tabpanel">
+        <div class="form-group form-check">
+            <input type="checkbox" class="form-check-input" id="auto_deploy" name="auto_deploy" value="true" {% if challenge.auto_deploy %}checked{% endif %}>
+            <label class="form-check-label" for="auto_deploy">Auto-Deploy Containers on VPN Download / Start</label>
+        </div>
+        <div class="form-group form-check">
+            <input type="checkbox" class="form-check-input" id="show_verify_details" name="show_verify_details" value="true" {% if challenge.show_verify_details %}checked{% endif %}>
+            <label class="form-check-label" for="show_verify_details">Show stdout/stderr to players on verification failure</label>
+        </div>
+        <div class="form-group">
+            <label for="verify_cooldown">Verification Cooldown (seconds)</label>
+            <input type="number" class="form-control" id="verify_cooldown" name="verify_cooldown" value="{{ challenge.verify_cooldown or 30 }}" min="5" max="600">
+        </div>
+        <div class="form-group form-check">
+            <input type="checkbox" class="form-check-input" id="allow_flag_fallback" name="allow_flag_fallback" value="true" {% if challenge.allow_flag_fallback %}checked{% endif %}>
+            <label class="form-check-label" for="allow_flag_fallback">Enable Static Flag Fallback</label>
+        </div>
+    </div>
+</div>
+{% endblock %}

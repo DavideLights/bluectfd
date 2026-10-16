@@ -1,0 +1,25 @@
+# Docker Compose Override for BlueAgent Plugin Integration
+version: '3'
+
+services:
+  ctfd:
+    build: .
+    user: root
+    environment:
+      - UWSGI_WSGI_FILE=/opt/CTFd/wsgi.py
+      - WORKERS=2
+      - LOG_FOLDER=/var/log/CTFd
+      - ACCESS_LOG=-
+      - ERROR_LOG=-
+      - BLUEAGENT_URL=http://172.17.0.1:8000
+      - BLUEAGENT_TOKEN=blueagent_secret_token_123
+      - BLUEAGENT_VERIFY_COOLDOWN=30
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - .data/CTFd/logs:/var/log/CTFd
+      - .data/CTFd/uploads:/var/uploads
+      - .:/opt/CTFd:rw
+      - ./CTFd/plugins/blueagent:/opt/CTFd/CTFd/plugins/blueagent:rw
+    ports:
+      - "4000:8000"

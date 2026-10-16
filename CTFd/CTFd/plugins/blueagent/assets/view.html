@@ -1,0 +1,116 @@
+{% extends "challenge.html" %}
+
+{% block description %}
+<link rel="stylesheet" href="{{ url_for('blueagent.static', filename='blueagent.css') }}">
+
+<div class="challenge-description-content mb-3">
+    {{ challenge.html }}
+</div>
+
+<div class="blueagent-card">
+    <div class="blueagent-header d-flex justify-content-between align-items-center">
+        <span>🛡️ Team Target Environment & VPN Access</span>
+        <span id="vpn-status-badge" class="badge-blueagent-offline">VPN Disconnected</span>
+    </div>
+    <div class="blueagent-body">
+        <div class="row align-items-center mb-3">
+            <div class="col-md-7">
+                <p class="mb-1"><strong>Subnet:</strong> <code id="player-subnet">10.?.1.0/24</code></p>
+                <small class="text-muted">Connect your computer to the team WireGuard VPN tunnel to reach your containers.</small>
+            </div>
+            <div class="col-md-5 text-right">
+                <a href="/api/v1/plugins/blueagent/vpn/download" class="btn btn-outline-primary btn-sm" id="btn-download-vpn">
+                    ⬇ Download WireGuard Config (.conf)
+                </a>
+            </div>
+        </div>
+
+        <h6 class="font-weight-bold">Target Containers</h6>
+        <div class="table-responsive">
+            <table class="table table-sm table-bordered blueagent-target-table mb-2" id="player-targets-table">
+                <thead>
+                    <tr>
+                        <th>Container</th>
+                        <th>IP Address</th>
+                        <th>Memory</th>
+                        <th>CPU</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td colspan="4" class="text-center text-muted">Loading targets...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div id="deploy-controls" class="mt-2 text-right" style="display: none;">
+            <span class="text-muted mr-2" id="deploy-status-label"></span>
+            <button type="button" class="btn btn-warning btn-sm" id="btn-start-env">▶ Start Environment</button>
+        </div>
+    </div>
+</div>
+
+<!-- Real-Time Dark OVN Verification Box -->
+<div class="blueagent-verify-box" id="blueagent-verify-container">
+    <div id="verify-state-idle">
+        <h5 class="mb-2">🧪 Automated Patch & Exploit Verification</h5>
+        <p class="text-muted mb-3">
+            Once you have applied your patch/defense to your running containers, click the button below. BlueAgent will instantly snapshot your containers into an isolated dark OVN sandbox and run automated functional readiness probes followed by live exploit tests.
+        </p>
+        <button type="button" class="btn btn-primary btn-lg px-4" id="btn-verify-patch">
+            🛡️ Verify Patch / Test Defense
+        </button>
+    </div>
+
+    <div id="verify-state-testing" style="display: none;">
+        <div class="blueagent-spinner text-primary mb-2"></div>
+        <h5>Running Dark OVN Sandbox Probes...</h5>
+        <p class="text-muted mb-0">Creating ZFS CoW clones, testing service readiness, and executing exploit audits. (Est. 5-20s)</p>
+        <small class="text-muted" id="verify-elapsed-timer">Elapsed: 0s</small>
+    </div>
+
+    <div id="verify-state-passed" style="display: none;">
+        <h4 class="text-success font-weight-bold">🎉 Defense Verified Successfully!</h4>
+        <p class="text-success mb-2" id="verify-passed-message">All services remained functional and all exploits were successfully deflected!</p>
+        <div class="badge badge-success px-3 py-2">Points Awarded & Solve Recorded</div>
+    </div>
+
+    <div id="verify-state-failed" style="display: none;">
+        <h5 class="text-danger font-weight-bold">✗ Verification Failed</h5>
+        <p class="text-danger mb-2" id="verify-failed-message"></p>
+        <div id="verify-failed-details" style="display: none;" class="mt-2">
+            <pre class="blueagent-details-pre" id="verify-failed-details-content"></pre>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm mt-3" id="btn-retry-verify">Retry Verification</button>
+    </div>
+
+    <div id="verify-state-busy" style="display: none;">
+        <h5 class="text-warning font-weight-bold">⏳ Verification Sandbox Busy</h5>
+        <p class="text-muted mb-2" id="verify-busy-message">A test is currently running for your team. Please wait for it to complete.</p>
+        <p class="font-weight-bold text-primary" id="verify-countdown-label">Retry available in: <span id="verify-countdown-seconds">30</span>s</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block input %}
+<input id="challenge-id" class="challenge-id" type="hidden" value="{{ challenge.id }}">
+{% if challenge.allow_flag_fallback %}
+<div class="form-group mt-3">
+    <label for="challenge-input" class="text-muted small">Fallback Secret Flag (Optional)</label>
+    <input type="text" class="challenge-input form-control" id="challenge-input" name="submission" placeholder="flag{...}" x-model="submission" @keyup.enter="submitChallenge()">
+</div>
+{% else %}
+<input type="hidden" id="challenge-input" value="VERIFIED_PATCH" x-model="submission">
+{% endif %}
+{% endblock %}
+
+{% block submit %}
+{% if challenge.allow_flag_fallback %}
+<button class="challenge-submit btn btn-outline-success w-100 h-100" id="challenge-submit" type="submit" @click.debounce.500ms="submitChallenge()">
+    Submit Flag
+</button>
+{% else %}
+<div style="display: none;">
+    <button id="challenge-submit" type="button">Submit</button>
+</div>
+{% endif %}
+{% endblock %}

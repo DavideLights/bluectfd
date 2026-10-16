@@ -1,0 +1,96 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+env/
+venv*
+.venv*
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+#  Usually these files are written by a python script from a template
+#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+.pytest_cache/
+nosetests.xml
+coverage.xml
+
+# Translations
+# TODO: CTFd 4.0 We should consider generating .mo files in a Docker image instead of saving them in git
+# *.mo
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# JS
+node_modules/
+
+# Flask Profiler files
+flask_profiler.sql
+
+# Editors / OS
+.idea/
+.vscode/
+.*.swp
+.DS_Store
+
+# Ruff
+.ruff_cache/
+
+# CTFd-specific
+CTFd/static/uploads
+CTFd/uploads
+.data/
+.ctfd_secret_key
+*.db
+*.log
+*.log.*
+
+# CTFd exports
+*.zip
+
+# non-default plugins
+CTFd/plugins/*
+!CTFd/plugins/challenges/
+!CTFd/plugins/dynamic_challenges/
+!CTFd/plugins/flags/
+!CTFd/plugins/blueagent/
+!CTFd/plugins/*.py
+
+# non-default themes
+CTFd/themes/*
+!CTFd/themes/admin/
+!CTFd/themes/core/
+!CTFd/themes/core-deprecated/

@@ -1,0 +1,46 @@
+---
+name: CTFd SQLite CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ['3.11']
+
+    name: Python ${{ matrix.python-version }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+            sudo yarn install --non-interactive
+
+      - name: Test
+        run: |
+            sudo rm -f /etc/boto.cfg
+            uv run make test
+        env:
+            AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
+            AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+            TESTING_DATABASE_URL: 'sqlite://'
+
+      - name: Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+

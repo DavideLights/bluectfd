@@ -1,0 +1,50 @@
+# PUT /teams/{team_k}
+
+## ENDPOINT & METHOD
+`PUT /teams/{team_k}`
+
+## PURPOSE & CTFD CONTEXT
+PROVISION OR UPDATE TEAM NETWORK ISOLATION INFRASTRUCTURE:
+1. CREATES LINUX BRIDGE `br-team-k` (`10.k.1.1/24`).
+2. CREATES WIREGUARD INTERFACE `wg-k` (`10.k.0.1/24`, PORT `51820 + team_k`).
+3. INSERTS NFTABLES FIREWALL ISOLATION RULES.
+4. SAVES TEAM RECORD IN BLUEAGENT DATABASE.
+USE CASE: CTFD ADMIN PRE-PROVISIONS TEAM OR AUTOMATICALLY ON FIRST TEAM ACTION. IDEMPOTENT.
+
+## AUTHENTICATION
+REQUIRED: `Authorization: Bearer <token>` OR `X-CTFd-Token: <token>`.
+
+## REQUEST
+PATH PARAMETER:
+- `team_k` (INT, REQUIRED, 0 <= team_k <= 254): UNIQUE DETERMINISTIC TEAM IDENTIFIER.
+HEADERS: `Content-Type: application/json`
+BODY SCHEMA (`TeamPutReq`):
+```json
+{
+  "name": "Team Alpha"
+}
+```
+FIELDS:
+- `name` (STR, REQUIRED, 1..128 CHARS): HUMAN READABLE TEAM NAME FROM CTFD.
+
+## RESPONSE
+STATUS:
+- `201 Created`: NEW TEAM PROVISIONED.
+- `200 OK`: TEAM ALREADY EXISTS (IDEMPOTENT UPDATE / RECOVERY).
+CONTENT-TYPE: `application/json`
+BODY SCHEMA (`TeamRecord`):
+```json
+{
+  "team_k": 1,
+  "name": "Team Alpha",
+  "bridge_name": "br-team-1",
+  "wg_interface": "wg-1",
+  "created_at": "2026-10-12T15:00:00Z"
+}
+```
+
+## ERROR CODES & CTFD ACTION
+- `401 Unauthorized`: INVALID TOKEN -> CHECK `BLUEAGENT_CTFD_API_TOKEN`.
+- `422 Unprocessable Entity`: `team_k` OUT OF RANGE (MUST BE 0..254) OR MISSING `name`.
+- `503 Service Unavailable`: TEAM LOCK BUSY / TIMEOUT -> RETRY WITH BACKOFF.
+- `500 Internal Server Error`: NETWORK/NFTABLES PROVISION FAILURE -> SHOW ADMIN ERROR.
