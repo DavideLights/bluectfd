@@ -1,7 +1,7 @@
 """Stateless challenge deployment and automated dark-sandbox verification endpoints."""
 
 import logging
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -125,11 +125,12 @@ async def get_active_containers(
 async def verify_challenge(
     team_k: int,
     config: ChallengeConfig,
+    skip_cleanup: bool = False,
     service: ChallengeService = Depends(get_challenge_service),
 ):
     """Executes verification against dark OVN sandbox clones with readiness checks."""
     try:
-        return await service.verify_challenge(team_k=team_k, config=config)
+        return await service.verify_challenge(team_k=team_k, config=config, skip_cleanup=skip_cleanup)
     except TeamNotFoundError as err:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -148,3 +149,22 @@ async def verify_challenge(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Verification failed: {exc}",
         )
+
+
+@router.delete("/{team_k}/verificator", status_code=status.HTTP_200_OK)
+async def cleanup_verify(
+    team_k: int,
+    config: Optional[ChallengeConfig] = None,
+    service: ChallengeService = Depends(get_challenge_service),
+):
+    """Tears down ephemeral verifier runner, clones, and dark OVN network for team k."""
+    try:
+        timings = await service.cleanup_verify_sandbox(team_k=team_k, config=config)
+        return {"status": "cleaned", "step_timings": timings}
+    except Exception as exc:
+        logger.exception("Cleanup failed unexpectedly for team %d: %s", team_k, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Verify cleanup failed: {exc}",
+        )
+

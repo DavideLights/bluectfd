@@ -42,7 +42,7 @@ class BlueAgentConfig:
     @property
     def token(self) -> str:
         """API bearer token / CTFd token for BlueAgent authentication."""
-        return get_plugin_config("blueagent_token", "blueagent_secret_token_123")
+        return get_plugin_config("blueagent_token", "secret-token")
 
     @property
     def default_verify_cooldown(self) -> int:

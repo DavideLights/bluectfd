@@ -512,6 +512,27 @@ verify_commands:
         assert res_start.status_code == 200
         assert res_start.get_json()["status"] == "running"
 
+        # 6b. Player tears down challenge environment (containers only, preserving team network)
+        rsps.add(
+            responses.DELETE,
+            f"http://127.0.0.1:8000/teams/{team_k}/machines",
+            status=204,
+        )
+        res_teardown = player_client.post(
+            f"/api/v1/plugins/blueagent/challenges/{chal_id}/teardown",
+            json={"nonce": player_nonce},
+        )
+        assert res_teardown.status_code == 200
+        assert res_teardown.get_json()["status"] == "torn_down"
+
+        # Re-start challenge environment for subsequent verification tests
+        res_restart = player_client.post(
+            f"/api/v1/plugins/blueagent/challenges/{chal_id}/start",
+            json={"nonce": player_nonce},
+        )
+        assert res_restart.status_code == 200
+        assert res_restart.get_json()["status"] == "running"
+
         # 7. Verification Failure Flow
         rsps.add(
             responses.POST,

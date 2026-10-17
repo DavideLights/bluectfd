@@ -156,6 +156,33 @@ def start_challenge_environment(challenge_id: int):
         return jsonify({"success": False, "message": f"Deployment failed: {exc}"}), 500
 
 
+@blueagent_bp.route("/api/v1/plugins/blueagent/challenges/<int:challenge_id>/teardown", methods=["POST"])
+@authed_only
+def teardown_challenge_environment(challenge_id: int):
+    """Tears down containers for challenge on team bridge while preserving team network interfaces."""
+    try:
+        account_id, account_type, account_name, user_id = get_current_account_context()
+    except PermissionError as err:
+        return jsonify({"success": False, "message": str(err)}), 403
+
+    challenge = BlueAgentPatchChallenge.query.filter_by(id=challenge_id).first_or_404()
+    mapping = get_team_mapping_for_account(account_id, account_type)
+    team_k = mapping.team_k
+
+    try:
+        teardown_challenge_for_team(team_k, challenge)
+        return jsonify({
+            "success": True,
+            "status": "torn_down",
+            "message": "Challenge environment torn down successfully.",
+        })
+    except BlueAgentUnavailable as unavail:
+        return jsonify({"success": False, "message": f"Orchestrator unavailable: {unavail}"}), 503
+    except Exception as exc:
+        logger.exception("Error tearing down challenge environment: %s", exc)
+        return jsonify({"success": False, "message": f"Teardown failed: {exc}"}), 500
+
+
 @blueagent_bp.route("/api/v1/plugins/blueagent/vpn/download", methods=["GET"])
 @authed_only
 def download_vpn_config():

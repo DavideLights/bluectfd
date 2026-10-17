@@ -1,9 +1,10 @@
 """Service layer for challenge deployment, verification, and container lifecycle."""
 
+import asyncio
 from datetime import datetime, timezone
 import logging
 import time
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from ..config import settings
 from ..database import DatabaseManager
@@ -336,7 +337,7 @@ class ChallengeService:
             raise TeamNotFoundError(f"Team {team_k} does not exist")
         return await self.db.list_team_containers(team_k)
 
-    async def verify_challenge(self, team_k: int, config: ChallengeConfig) -> VerifyResultResp:
+    async def verify_challenge(self, team_k: int, config: ChallengeConfig, skip_cleanup: bool = False) -> VerifyResultResp:
         """Executes verification against dark OVN sandbox clones with readiness checks."""
         try:
             async with self.locks.acquire("verify", str(team_k), timeout=0.01):
@@ -353,7 +354,10 @@ class ChallengeService:
                 try:
                     result = await verifier.run_checks()
                 finally:
-                    await verifier.__aexit__(None, None, None)
+                    if not skip_cleanup:
+                        await verifier.__aexit__(None, None, None)
+                    else:
+                        verifier.step_timings["total_verify_lifecycle_sec"] = round(time.perf_counter() - verifier._t_start, 4)
                 if result is not None:
                     if result.details is None:
                         result.details = {}
@@ -363,3 +367,34 @@ class ChallengeService:
             raise VerificationLockedError(
                 f"Verification already in progress or team resource locked for team {team_k}"
             ) from lock_err
+
+    async def cleanup_verify_sandbox(self, team_k: int, config: Optional[ChallengeConfig] = None) -> Dict[str, Any]:
+        """Tears down ephemeral verifier runner, clones, and dark OVN network for team k."""
+        t_clean = time.perf_counter()
+        t0 = time.perf_counter()
+
+        # Stop and delete any verify-{team_k}-* instances
+        instances = await self.engine.list_instances()
+        verify_insts = [name for name in instances if name.startswith(f"verify-{team_k}-") or name == f"verify-runner-{team_k}"]
+        if verify_insts:
+            await asyncio.gather(*[
+                self.engine.stop_instance(name, force=True) for name in verify_insts
+            ], return_exceptions=True)
+            await asyncio.gather(*[
+                self.engine.delete_instance(name) for name in verify_insts
+            ], return_exceptions=True)
+        clones_clean_sec = time.perf_counter() - t0
+
+        t1 = time.perf_counter()
+        try:
+            await self.engine.delete_network(f"verify-{team_k}")
+        except Exception:
+            pass
+        ovn_net_clean_sec = time.perf_counter() - t1
+
+        return {
+            "clones_teardown_sec": round(clones_clean_sec, 4),
+            "ovn_network_delete_sec": round(ovn_net_clean_sec, 4),
+            "total_cleanup_sec": round(time.perf_counter() - t_clean, 4),
+        }
+

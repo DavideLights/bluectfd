@@ -73,7 +73,7 @@ class OVNVerifier:
                 clone_sec = time.perf_counter() - t_cl
 
                 t_conn = time.perf_counter()
-                await self.engine.connect_network(clone_name, self.net_name)
+                await self.engine.connect_network(clone_name, self.net_name, ip_address=ip_addr)
                 conn_sec = time.perf_counter() - t_conn
 
                 t_st = time.perf_counter()

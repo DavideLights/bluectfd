@@ -37,7 +37,7 @@ def _ensure_network_dirs_in_definition(raw_yaml: str) -> str:
         if not has_net_dirs:
             actions.append({
                 "trigger": "post-files",
-                "action": "mkdir -p /etc/systemd/network /etc/network",
+                "action": "#!/bin/sh\nmkdir -p /etc/systemd/network /etc/network\n",
             })
             return yaml.dump(data, sort_keys=False)
         return raw_yaml
