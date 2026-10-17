@@ -80,12 +80,6 @@ class SubprocessRunner(CommandRunner):
         cmd_str = " ".join(argv)
         logger.debug("Executing host command: %s", cmd_str)
 
-        stdin_file = None
-        if stdin is not None:
-            stdin_file = tempfile.TemporaryFile()
-            stdin_file.write(stdin)
-            stdin_file.seek(0)
-
         env = dict(os.environ)
         current_path = env.get("PATH", "")
         extra_paths = [p for p in ("/usr/sbin", "/sbin", "/usr/local/sbin") if p not in current_path.split(":")]
@@ -98,7 +92,7 @@ class SubprocessRunner(CommandRunner):
         proc = await asyncio.create_subprocess_exec(
             target_bin,
             *argv[1:],
-            stdin=stdin_file if stdin_file is not None else None,
+            stdin=asyncio.subprocess.PIPE if stdin is not None else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
@@ -106,7 +100,7 @@ class SubprocessRunner(CommandRunner):
 
         try:
             out_bytes, err_bytes = await asyncio.wait_for(
-                proc.communicate(),
+                proc.communicate(input=stdin),
                 timeout=timeout,
             )
         except asyncio.TimeoutError as err:
@@ -116,10 +110,6 @@ class SubprocessRunner(CommandRunner):
                 pass
             await proc.communicate()
             raise TimeoutError(f"Command '{cmd_str}' timed out after {timeout:.1f}s") from err
-        finally:
-            if stdin_file is not None:
-                stdin_file.close()
-
         stdout = out_bytes.decode("utf-8", errors="replace")
         stderr = err_bytes.decode("utf-8", errors="replace")
         returncode = proc.returncode if proc.returncode is not None else -1

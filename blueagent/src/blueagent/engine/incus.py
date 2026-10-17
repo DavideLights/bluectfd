@@ -410,13 +410,14 @@ class IncusEngine(ContainerEngine):
         cmd: List[str],
         env: Optional[Dict[str, str]] = None,
         timeout: int = 15,
+        capture_output: bool = True,
     ) -> ExecResult:
         """Executes a command vector in the specified container instance."""
         payload = {
             "command": cmd,
             "environment": env or {},
             "wait-for-websocket": False,
-            "record-output": True,
+            "record-output": capture_output,
         }
         res = await self.client.post(f"instances/{name}/exec", json=payload)
         res.raise_for_status()
@@ -432,40 +433,41 @@ class IncusEngine(ContainerEngine):
 
         stdout = ""
         stderr = ""
-        output_files = output_meta.get("output", {})
-        # Map both str and int descriptors: 1 = stdout, 2 = stderr
-        stdout_url = output_files.get("1") or output_files.get(1)
-        stderr_url = output_files.get("2") or output_files.get(2)
+        if capture_output:
+            output_files = output_meta.get("output", {})
+            # Map both str and int descriptors: 1 = stdout, 2 = stderr
+            stdout_url = output_files.get("1") or output_files.get(1)
+            stderr_url = output_files.get("2") or output_files.get(2)
 
-        if stdout_url:
-            log_path = str(stdout_url).lstrip("/")
-            rel_path = log_path.removeprefix("1.0/")
-            try:
-                log_res = await self.client.get(rel_path)
-                if log_res.status_code == 200:
-                    stdout = log_res.text
-            except Exception:
-                pass
-            finally:
+            if stdout_url:
+                log_path = str(stdout_url).lstrip("/")
+                rel_path = log_path.removeprefix("1.0/")
                 try:
-                    await self.client.delete(rel_path)
+                    log_res = await self.client.get(rel_path)
+                    if log_res.status_code == 200:
+                        stdout = log_res.text
                 except Exception:
                     pass
+                finally:
+                    try:
+                        await self.client.delete(rel_path)
+                    except Exception:
+                        pass
 
-        if stderr_url:
-            log_path = str(stderr_url).lstrip("/")
-            rel_path = log_path.removeprefix("1.0/")
-            try:
-                log_res = await self.client.get(rel_path)
-                if log_res.status_code == 200:
-                    stderr = log_res.text
-            except Exception:
-                pass
-            finally:
+            if stderr_url:
+                log_path = str(stderr_url).lstrip("/")
+                rel_path = log_path.removeprefix("1.0/")
                 try:
-                    await self.client.delete(rel_path)
+                    log_res = await self.client.get(rel_path)
+                    if log_res.status_code == 200:
+                        stderr = log_res.text
                 except Exception:
                     pass
+                finally:
+                    try:
+                        await self.client.delete(rel_path)
+                    except Exception:
+                        pass
 
         return ExecResult(
             exit_code=exit_code,

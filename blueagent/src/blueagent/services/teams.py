@@ -8,7 +8,7 @@ from typing import List, Optional, Tuple, Union
 from ..database import DatabaseManager
 from ..engine.base import ContainerEngine
 from ..locks import LockRegistry
-from ..models import PeerStats, PeerTelemetry, TeamMemberResp, TeamMemberWG, TeamRecord
+from ..models import PeerTelemetry, TeamMemberResp, TeamMemberWG, TeamRecord
 from ..network.addressing import allocate_member_ip
 from ..network.host_net import HostNetworkManager
 from ..network.wireguard import WireGuardManager, generate_keypair, generate_preshared_key
@@ -131,10 +131,6 @@ class TeamService:
         """Creates or updates team environment within lock."""
         async with self.locks.lock_team(team_k):
             return await self.provision_team_network(team_k=team_k, name=name)
-
-    async def create_team(self, team_k: int, name: str) -> Tuple[TeamRecord, bool]:
-        """Alias for create_or_update_team for backward compatibility."""
-        return await self.create_or_update_team(team_k=team_k, name=name)
 
     async def list_teams(self) -> List[TeamRecord]:
         """Lists all registered teams."""
@@ -431,36 +427,3 @@ class TeamService:
 
             await self.wg.remove_peer(team_k, member.public_key)
             await self.db.delete_team_member_by_team(team_k, member.member_id)
-
-    async def get_peer_stats(self, team_k: int) -> List[PeerStats]:
-        """Returns active WireGuard peers and telemetry for a team."""
-        team = await self.db.get_team_by_k(team_k)
-        if not team:
-            raise TeamNotFoundError(f"Team {team_k} not found")
-
-        members = await self.db.list_team_members(team_k)
-        active_peers = await self.wg.list_peers(team_k)
-        now_ts = int(time.time())
-
-        stats_list: List[PeerStats] = []
-        for m in members:
-            p_stat = active_peers.get(m.public_key, {})
-            latest_hs = p_stat.get("latest_handshake", 0)
-            online = (now_ts - latest_hs <= 180) if latest_hs > 0 else False
-            stats_list.append(
-                PeerStats(
-                    member_id=m.member_id,
-                    ctfd_user_id=m.ctfd_user_id,
-                    name=m.name,
-                    client_ip=m.client_ip,
-                    public_key=m.public_key,
-                    endpoint=p_stat.get("endpoint") if p_stat.get("endpoint") != "(none)" else None,
-                    allowed_ips=p_stat.get("allowed_ips", f"{m.client_ip}/32"),
-                    latest_handshake=latest_hs,
-                    transfer_rx=p_stat.get("transfer_rx", 0),
-                    transfer_tx=p_stat.get("transfer_tx", 0),
-                    persistent_keepalive=p_stat.get("persistent_keepalive", "off"),
-                    online=online,
-                )
-            )
-        return stats_list

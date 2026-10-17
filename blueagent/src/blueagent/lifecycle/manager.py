@@ -7,7 +7,7 @@ self-healing orphaned sandbox resources, and graceful shutdown.
 import asyncio
 from datetime import datetime, timezone
 import logging
-from typing import Optional
+from typing import Any, Optional
 from ..config import settings
 from ..engine.base import ContainerEngine
 
@@ -22,10 +22,12 @@ class LifecycleManager:
         engine: ContainerEngine,
         interval_seconds: int = settings.reconciliation_interval_seconds,
         grace_period_seconds: int = settings.resource_grace_period_seconds,
+        locks: Optional[Any] = None,
     ):
         self.engine = engine
         self.interval_seconds = interval_seconds
         self.grace_period_seconds = grace_period_seconds
+        self.locks = locks
         self._task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event()
 
@@ -114,6 +116,7 @@ class LifecycleManager:
         now = datetime.now(timezone.utc)
 
         # 1. Clean up orphaned verify instances older than grace period
+        active_instances = []
         try:
             verify_instances = await self.engine.list_instances(prefix="verify-")
             for inst_name in verify_instances:
@@ -128,19 +131,21 @@ class LifecycleManager:
                             created_dt = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
                             age_seconds = (now - created_dt).total_seconds()
                             if age_seconds < self.grace_period_seconds:
+                                active_instances.append(inst_name)
                                 continue
                         except Exception as dt_err:
                             logger.debug("Could not parse created_at for %s: %s", inst_name, dt_err)
 
                     logger.info(
-                        "LifecycleManager: Pruning expired orphaned verification instance '%s'",
+                        "LifecycleManager: Pruning expired orphaned verification instance %s",
                         inst_name,
                     )
                     await self.engine.stop_instance(inst_name, force=True)
                     await self.engine.delete_instance(inst_name)
                 except Exception as inst_err:
+                    active_instances.append(inst_name)
                     logger.warning(
-                        "LifecycleManager: Failed cleaning up instance '%s': %s",
+                        "LifecycleManager: Failed cleaning up instance %s: %s",
                         inst_name,
                         inst_err,
                     )
@@ -151,15 +156,31 @@ class LifecycleManager:
         try:
             verify_nets = await self.engine.list_networks(prefix="verify-")
             for net_name in verify_nets:
+                # Extract team_k if present (verify-{team_k})
+                parts = net_name.split("-")
+                team_k_val = None
+                if len(parts) >= 2 and parts[1].isdigit():
+                    team_k_val = int(parts[1])
+
+                if team_k_val is not None and self.locks and self.locks.is_verify_locked(team_k_val):
+                    logger.debug("LifecycleManager: Skipping network %s because verify lock is active for team %d", net_name, team_k_val)
+                    continue
+
+                # Check if any unpruned verify instance is still using this network / team
+                matching_instances = [inst for inst in active_instances if f"verify-{parts[1]}" in inst] if len(parts) >= 2 else active_instances
+                if matching_instances:
+                    logger.debug("LifecycleManager: Skipping network %s as unpruned instances still exist: %s", net_name, matching_instances)
+                    continue
+
                 try:
                     logger.info(
-                        "LifecycleManager: Pruning orphaned verification network '%s'",
+                        "LifecycleManager: Pruning orphaned verification network %s",
                         net_name,
                     )
                     await self.engine.delete_network(net_name)
                 except Exception as net_err:
                     logger.debug(
-                        "LifecycleManager: Network '%s' could not be pruned (may still be in use): %s",
+                        "LifecycleManager: Network %s could not be pruned (may still be in use): %s",
                         net_name,
                         net_err,
                     )

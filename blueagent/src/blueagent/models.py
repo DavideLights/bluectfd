@@ -1,3 +1,4 @@
+import re
 """Pydantic v2 schemas and data validation models for BlueAgent v2.
 
 Encapsulates strict type contracts for:
@@ -55,6 +56,18 @@ class CommandSpec(BaseModel):
         ge=1,
         description="Total maximum time to retry in seconds (used for readiness commands)",
     )
+    retries: int = Field(
+        default=1,
+        ge=1,
+        le=10,
+        description="Number of execution attempts for verify commands",
+    )
+    retry_delay: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=30.0,
+        description="Seconds to wait between retry attempts for verify commands",
+    )
 
 
 class ContainerSpec(BaseModel):
@@ -96,6 +109,12 @@ class VerifierSpec(BaseModel):
 class ChallengeConfig(BaseModel):
     """Declarative Infrastructure-as-Code (IaC) configuration for challenge deployment and verification."""
 
+    team_k: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=254,
+        description="Target team identifier index k (0-254)",
+    )
     challenge_id: str = Field(
         ...,
         pattern=r"^[a-z0-9][a-z0-9-]{0,24}$",
@@ -141,6 +160,51 @@ class ChallengeConfig(BaseModel):
         for c in self.containers:
             if len(c.name) > 56:
                 raise ValueError(f"Container name '{c.name}' exceeds limit (max 56 chars to allow c-team_k- prefix)")
+
+    def render_for_team(self, team_k: int) -> "ChallengeConfig":
+        return render_challenge_config(self, team_k)
+
+
+RE_PLACEHOLDER = re.compile(r"\{\{([a-zA-Z0-9_:]+)\}\}")
+
+
+def render_challenge_config(config: "ChallengeConfig", team_k: int) -> "ChallengeConfig":
+    """Renders a copy of ChallengeConfig with placeholders replaced for team_k.
+
+    Supported placeholders:
+    - {{team_k}} -> str(team_k)
+    - {{subnet}} -> 10.<team_k>.1
+    - {{verifier_ip}} -> 10.<team_k>.1.<verifier.ip_suffix or 250>
+    - {{ip:<name>}} -> 10.<team_k>.1.<c.ip_suffix>
+    """
+    v_suffix = config.verifier.ip_suffix if config.verifier else 250
+    replacements = {
+        "team_k": str(team_k),
+        "subnet": f"10.{team_k}.1",
+        "verifier_ip": f"10.{team_k}.1.{v_suffix}",
+    }
+    for c in config.containers:
+        replacements[f"ip:{c.name}"] = f"10.{team_k}.1.{c.ip_suffix}"
+
+    def _replace_string(s: str) -> str:
+        return RE_PLACEHOLDER.sub(lambda m: replacements.get(m.group(1).strip(), m.group(0)), s)
+
+    def _walk_and_replace(obj):
+        if isinstance(obj, str):
+            return _replace_string(obj)
+        elif isinstance(obj, list):
+            return [_walk_and_replace(item) for item in obj]
+        elif isinstance(obj, dict):
+            return {k: _walk_and_replace(v) for k, v in obj.items()}
+        return obj
+
+    data = config.model_dump()
+    data["team_k"] = team_k
+    data["readiness_commands"] = _walk_and_replace(data.get("readiness_commands", []))
+    data["verify_commands"] = _walk_and_replace(data.get("verify_commands", []))
+    data["containers"] = _walk_and_replace(data.get("containers", []))
+    return ChallengeConfig.model_validate(data)
+
 
 
 class VerifyResultResp(BaseModel):
@@ -259,22 +323,6 @@ class TeamRecord(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class PeerStats(BaseModel):
-    """WireGuard peer status and bandwidth telemetry for a team member."""
-
-    member_id: str
-    ctfd_user_id: Optional[int] = None
-    name: str
-    client_ip: str
-    public_key: str
-    endpoint: Optional[str] = None
-    allowed_ips: str
-    latest_handshake: int = 0
-    transfer_rx: int = 0
-    transfer_tx: int = 0
-    persistent_keepalive: str = "off"
-    online: bool = False
-
 
 class ImageRecord(BaseModel):
     """Persisted distrobuilder image build record."""
@@ -319,7 +367,6 @@ class DeployResponse(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     error: Optional[str] = None
     containers: List[RunningContainerRecord] = Field(default_factory=list)
-    instances: List[RunningContainerRecord] = Field(default_factory=list)
     step_timings: Optional[Dict[str, Any]] = None
 
     model_config = ConfigDict(from_attributes=True)

@@ -27,10 +27,9 @@ class OVNVerifier:
     NOTE: This is an architectural template to be populated in Phase 2.
     """
 
-    def __init__(self, engine: ContainerEngine, config: ChallengeConfig, session_id: str, team_k: Optional[int] = None):
+    def __init__(self, engine: ContainerEngine, config: ChallengeConfig, session_id: Optional[str] = None, team_k: Optional[int] = None):
         self.engine = engine
         self.config = config
-        self.session_id = session_id[:4] if len(session_id) > 4 else session_id
         if team_k is not None:
             self.team_k = team_k
         elif hasattr(config, "team_k") and getattr(config, "team_k") is not None:
@@ -47,11 +46,13 @@ class OVNVerifier:
         """Provisions the dark OVN network and CoW clones the target instances."""
         try:
             t_enter = time.perf_counter()
+            allow_inet = bool(getattr(self.config, "verify_internet_access", True))
             net_config = {
-                "network": "incusbr0",
                 "ipv4.address": f"10.{self.team_k}.1.1/24",
-                "ipv4.nat": "true",
+                "ipv4.nat": "true" if allow_inet else "false",
             }
+            if allow_inet:
+                net_config["network"] = settings.incus_uplink_network
 
             t0 = time.perf_counter()
             await self.engine.create_network(
@@ -61,7 +62,8 @@ class OVNVerifier:
             ovn_net_sec = time.perf_counter() - t0
 
             clone_timings: List[dict] = []
-            for c in self.config.containers:
+
+            async def _prepare_clone(c):
                 c_t0 = time.perf_counter()
                 source_name = f"c-{self.team_k}-{c.name}"
                 clone_name = f"verify-{self.team_k}-{c.name}"
@@ -70,6 +72,7 @@ class OVNVerifier:
 
                 t_cl = time.perf_counter()
                 await self.engine.clone_instance(source_name, clone_name)
+                self.clones.append(clone_name)
                 clone_sec = time.perf_counter() - t_cl
 
                 t_conn = time.perf_counter()
@@ -79,26 +82,28 @@ class OVNVerifier:
                 t_st = time.perf_counter()
                 await self.engine.start_instance(clone_name)
                 start_sec = time.perf_counter() - t_st
-                self.clones.append(clone_name)
 
                 # Ensure runtime IP and route are active
                 t_net = time.perf_counter()
                 try:
-                    await self.engine.exec_command(clone_name, ip.addr_replace(f"{ip_addr}/24", "eth0"))
-                    await self.engine.exec_command(clone_name, ip.link_up("eth0"))
-                    await self.engine.exec_command(clone_name, ip.route_replace_default(gw_ip, "eth0"))
+                    await self.engine.exec_command(clone_name, ip.addr_replace(f"{ip_addr}/24", "eth0"), capture_output=False)
+                    await self.engine.exec_command(clone_name, ip.link_up("eth0"), capture_output=False)
+                    await self.engine.exec_command(clone_name, ip.route_replace_default(gw_ip, "eth0"), capture_output=False)
                 except Exception:
                     pass
                 runtime_net_sec = time.perf_counter() - t_net
 
-                clone_timings.append({
+                return {
                     "clone": clone_name,
                     "clone_sec": round(clone_sec, 4),
                     "connect_sec": round(conn_sec, 4),
                     "start_sec": round(start_sec, 4),
                     "runtime_net_sec": round(runtime_net_sec, 4),
                     "total_clone_sec": round(time.perf_counter() - c_t0, 4),
-                })
+                }
+
+            if self.config.containers:
+                clone_timings = list(await asyncio.gather(*[_prepare_clone(c) for c in self.config.containers]))
 
             runner_sec = 0.0
             if self.config.verifier:
@@ -135,9 +140,9 @@ class OVNVerifier:
 
                 # Ensure runtime IP and route are active
                 try:
-                    await self.engine.exec_command(v_name, ip.addr_replace(f"{v_ip}/24", "eth0"))
-                    await self.engine.exec_command(v_name, ip.link_up("eth0"))
-                    await self.engine.exec_command(v_name, ip.route_replace_default(gw_ip, "eth0"))
+                    await self.engine.exec_command(v_name, ip.addr_replace(f"{v_ip}/24", "eth0"), capture_output=False)
+                    await self.engine.exec_command(v_name, ip.link_up("eth0"), capture_output=False)
+                    await self.engine.exec_command(v_name, ip.route_replace_default(gw_ip, "eth0"), capture_output=False)
                 except Exception:
                     pass
                 runner_sec = time.perf_counter() - t_v
@@ -170,13 +175,16 @@ class OVNVerifier:
                 pass
             self.verifier_container_name = None
 
-        for clone in reversed(self.clones):
+        async def _destroy_inst(inst_name):
             try:
-                await self.engine.stop_instance(clone, force=True)
-                await self.engine.delete_instance(clone)
+                await self.engine.stop_instance(inst_name, force=True)
+                await self.engine.delete_instance(inst_name)
             except Exception:
                 pass
-        self.clones.clear()
+
+        if self.clones:
+            await asyncio.gather(*[_destroy_inst(clone) for clone in self.clones])
+            self.clones.clear()
         clones_clean_sec = time.perf_counter() - t0
 
         t1 = time.perf_counter()
@@ -259,7 +267,8 @@ class OVNVerifier:
                 else:
                     return VerifyResultResp(success=False, passed=False, message=f"Unknown target {cmd.target}")
 
-                retries = 3
+                retries = getattr(cmd, "retries", 1)
+                retry_delay = getattr(cmd, "retry_delay", 1.0)
                 res = None
                 for attempt in range(retries):
                     try:
@@ -269,11 +278,13 @@ class OVNVerifier:
                             env=cmd.env,
                             timeout=cmd.timeout,
                         )
-                        if res.exit_code == 0 or attempt == retries - 1:
+                        if res.exit_code == 0:
                             break
+                        if attempt < retries - 1 and retry_delay > 0:
+                            await asyncio.sleep(retry_delay)
                     except Exception as e:
-                        if attempt < retries - 1:
-                            await asyncio.sleep(0.5)
+                        if attempt < retries - 1 and retry_delay > 0:
+                            await asyncio.sleep(retry_delay)
                         else:
                             raise e
 

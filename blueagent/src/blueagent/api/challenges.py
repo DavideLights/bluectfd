@@ -3,7 +3,7 @@
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from ..dependencies import get_challenge_service, require_ctfd_token
 from ..locks import LockTimeoutError
@@ -77,12 +77,18 @@ async def deploy_challenge(
 @router.delete("/{team_k}/machines", status_code=status.HTTP_204_NO_CONTENT)
 async def teardown_challenge_endpoint(
     team_k: int,
+    containers: Optional[str] = Query(default=None, description="Comma-separated container names to teardown (e.g. 'web,db')"),
     config: Optional[ChallengeConfig] = None,
     service: ChallengeService = Depends(get_challenge_service),
 ):
     """Tears down containers deployed for a challenge on team k."""
     try:
-        c_names = [c.name for c in config.containers] if (config and config.containers) else None
+        c_names = None
+        if containers:
+            c_names = [c.strip() for c in containers.split(",") if c.strip()]
+        elif config and config.containers:
+            c_names = [c.name for c in config.containers]
+
         challenge_id = config.challenge_id if config else "ch"
         await service.teardown_challenge(
             team_k=team_k,

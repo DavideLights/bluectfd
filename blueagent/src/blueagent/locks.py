@@ -144,9 +144,6 @@ class LockRegistry:
         resource_name = f"{resource_type}:{resource_id}"
         if lock_path not in self._locks:
             self._locks[lock_path] = TwoTierLock(lock_path, resource_name=resource_name, timeout=timeout)
-        else:
-            self._locks[lock_path].default_timeout = timeout
-            self._locks[lock_path].resource_name = resource_name
         return self._locks[lock_path]
 
     def is_locked(self, resource_type: str, resource_id: str) -> bool:

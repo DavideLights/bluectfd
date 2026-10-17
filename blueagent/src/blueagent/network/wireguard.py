@@ -327,7 +327,6 @@ class WireGuardManager:
         client_priv: Optional[str] = None
         client_pub: str
 
-        # TODO: this does not make sense
         if private_key:
             client_priv = private_key
             client_pub = public_key if public_key else public_key_from_private(private_key)

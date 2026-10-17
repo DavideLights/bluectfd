@@ -102,6 +102,7 @@ class ContainerEngine(ABC):
         cmd: List[str],
         env: Optional[Dict[str, str]] = None,
         timeout: int = 15,
+        capture_output: bool = True,
     ) -> ExecResult:
         """Executes a command vector inside the container and returns exit code and streams."""
         pass

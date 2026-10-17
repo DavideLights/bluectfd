@@ -390,7 +390,7 @@ async def test_team_service_operations(service_env):
     team_svc = TeamService(db=db, host_net=host_net, wg=wg, engine=engine, locks=locks)
 
     # Provision team
-    team, is_new = await team_svc.create_team(team_k=20, name="Team 20")
+    team, is_new = await team_svc.create_or_update_team(team_k=20, name="Team 20")
     assert is_new is True
     assert team.team_k == 20
 

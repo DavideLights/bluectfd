@@ -74,7 +74,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as err:
         logger.warning("Could not apply host nftables rules at startup: %s", err)
 
-    # 6. Re-sync live network state from database
+    # 6. Re-sync live network state and active challenge containers from database
     try:
         teams = await db.list_teams()
         for t in teams:
@@ -90,14 +90,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     allowed_ips=m.client_ip,
                     preshared_key=m.preshared_key,
                 )
+
+        # Restore / restart stopped challenge containers registered in DB
+        containers = await db.list_all_containers()
+        for c in containers:
+            try:
+                status = await engine.get_instance_status(c.instance_name)
+                if status == "STOPPED":
+                    logger.info("Re-starting container %s on bridge br-team-%d", c.instance_name, c.team_k)
+                    await engine.start_instance(c.instance_name)
+                    gateway_ip = f"10.{c.team_k}.1.1"
+                    from .network.commands import ip
+                    await engine.exec_command(c.instance_name, ip.addr_replace(f"{c.ip_address}/24", "eth0"), capture_output=False)
+                    await engine.exec_command(c.instance_name, ip.link_up("eth0"), capture_output=False)
+                    await engine.exec_command(c.instance_name, ip.route_replace_default(gateway_ip, "eth0"), capture_output=False)
+            except Exception as c_err:
+                logger.warning("Could not reconcile container %s: %s", c.instance_name, c_err)
     except Exception as err:
-        logger.warning("Error during boot network reconciliation: %s", err)
+        logger.warning("Error during boot system reconciliation: %s", err)
 
     # 7. Initialize and start Lifecycle Manager background reconciliation worker
     lifecycle = LifecycleManager(
         engine=engine,
         interval_seconds=settings.reconciliation_interval_seconds,
         grace_period_seconds=settings.resource_grace_period_seconds,
+        locks=locks,
     )
     await lifecycle.start()
     app.state.lifecycle = lifecycle

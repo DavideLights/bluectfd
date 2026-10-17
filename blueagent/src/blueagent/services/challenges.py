@@ -1,6 +1,7 @@
 """Service layer for challenge deployment, verification, and container lifecycle."""
 
 from datetime import datetime, timezone
+import asyncio
 import logging
 import time
 from typing import List, Optional
@@ -86,14 +87,18 @@ async def teardown_challenge(
         targets = await db.list_team_containers(team_k)
 
     errors = []
-    for inst in targets:
+
+    async def _delete_inst(inst):
         try:
-            logger.info("Stopping and deleting instance '%s'", inst.instance_name)
+            logger.info("Stopping and deleting instance %s", inst.instance_name)
             await engine.delete_instance(inst.instance_name, force=True)
             await db.delete_container(inst.instance_name)
         except Exception as exc:
-            logger.warning("Error deleting instance '%s': %s", inst.instance_name, exc)
+            logger.warning("Error deleting instance %s: %s", inst.instance_name, exc)
             errors.append(f"{inst.instance_name}: {exc}")
+
+    if targets:
+        await asyncio.gather(*[_delete_inst(inst) for inst in targets])
 
     if errors:
         err_msg = "; ".join(errors)
@@ -119,6 +124,7 @@ class ChallengeService:
 
     async def deploy_challenge(self, team_k: int, config: ChallengeConfig) -> DeployResponse:
         """Deploys a multi-container challenge to the target team's bridge idempotently."""
+        config = config.render_for_team(team_k)
         async with self.locks.lock_team(team_k):
             t_deploy_start = time.perf_counter()
             # 1. Verify team exists
@@ -165,98 +171,103 @@ class ChallengeService:
                     )
             validation_sec = time.perf_counter() - t0
 
-            # 4. Container provisioning and configuration (idempotent upsert)
+            # 4. Container provisioning and configuration (idempotent parallel upsert)
             created_instances: List[str] = []
             container_timings: List[dict] = []
+
+            async def _deploy_single(c):
+                c_t0 = time.perf_counter()
+                full_inst_name = f"c-{team_k}-{c.name}"
+                ip_addr = f"10.{team_k}.1.{c.ip_suffix}"
+                gateway_ip = f"10.{team_k}.1.1"
+
+                existing_container = await self.db.get_container(full_inst_name)
+                if existing_container:
+                    logger.info(
+                        "Container %s is already running for team %d, reusing it",
+                        full_inst_name,
+                        team_k,
+                    )
+                    return None
+
+                dev_map = devices.nic_bridge(bridge_name, dev_name="eth0")
+                extra_config = {
+                    "user.blueagent.team_k": str(team_k),
+                    "user.blueagent.spec_name": c.name,
+                }
+
+                spec_copy = c.model_copy(update={"name": full_inst_name})
+                logger.info("Creating container %s on bridge %s", full_inst_name, bridge_name)
+                t_create = time.perf_counter()
+                await self.engine.create_instance(spec_copy, devices=dev_map, extra_config=extra_config)
+                create_sec = time.perf_counter() - t_create
+                created_instances.append(full_inst_name)
+
+                # Inject network configurations
+                t_push = time.perf_counter()
+                networkd_conf = render_networkd_conf(ip=ip_addr, gateway=gateway_ip)
+                await self.engine.push_file(
+                    full_inst_name,
+                    "/etc/systemd/network/10-eth0.network",
+                    networkd_conf,
+                    mode="0644",
+                )
+
+                interfaces_conf = render_interfaces_conf(ip=ip_addr, gateway=gateway_ip)
+                await self.engine.push_file(
+                    full_inst_name,
+                    "/etc/network/interfaces",
+                    interfaces_conf,
+                    mode="0644",
+                )
+
+                await self.engine.push_file(
+                    full_inst_name,
+                    "/etc/hostname",
+                    f"{c.name}\n",
+                    mode="0644",
+                )
+                push_sec = time.perf_counter() - t_push
+
+                # Start instance
+                logger.info("Starting container %s", full_inst_name)
+                t_start = time.perf_counter()
+                await self.engine.start_instance(full_inst_name)
+                start_sec = time.perf_counter() - t_start
+
+                t_net = time.perf_counter()
+                try:
+                    await self.engine.exec_command(full_inst_name, ip.addr_replace(f"{ip_addr}/24", "eth0"), capture_output=False)
+                    await self.engine.exec_command(full_inst_name, ip.link_up("eth0"), capture_output=False)
+                    await self.engine.exec_command(full_inst_name, ip.route_replace_default(gateway_ip, "eth0"), capture_output=False)
+                except Exception as net_err:
+                    logger.warning("Could not apply immediate runtime IP to %s: %s", full_inst_name, net_err)
+                runtime_net_sec = time.perf_counter() - t_net
+
+                t_db = time.perf_counter()
+                await self.db.record_container(
+                    instance_name=full_inst_name,
+                    team_k=team_k,
+                    spec_name=c.name,
+                    ip_address=ip_addr,
+                    image_alias=c.image,
+                )
+                db_record_sec = time.perf_counter() - t_db
+
+                return {
+                    "container": c.name,
+                    "create_sec": round(create_sec, 4),
+                    "push_sec": round(push_sec, 4),
+                    "start_sec": round(start_sec, 4),
+                    "runtime_net_sec": round(runtime_net_sec, 4),
+                    "db_record_sec": round(db_record_sec, 4),
+                    "total_container_sec": round(time.perf_counter() - c_t0, 4),
+                }
+
             try:
-                for c in config.containers:
-                    c_t0 = time.perf_counter()
-                    full_inst_name = f"c-{team_k}-{c.name}"
-                    ip_addr = f"10.{team_k}.1.{c.ip_suffix}"
-                    gateway_ip = f"10.{team_k}.1.1"
-
-                    existing_container = await self.db.get_container(full_inst_name)
-                    if existing_container:
-                        logger.info(
-                            "Container '%s' is already running for team %d, reusing it",
-                            full_inst_name,
-                            team_k,
-                        )
-                        continue
-
-                    dev_map = devices.nic_bridge(bridge_name, dev_name="eth0")
-                    extra_config = {
-                        "user.blueagent.team_k": str(team_k),
-                        "user.blueagent.spec_name": c.name,
-                    }
-
-                    spec_copy = c.model_copy(update={"name": full_inst_name})
-                    logger.info("Creating container '%s' on bridge '%s'", full_inst_name, bridge_name)
-                    t_create = time.perf_counter()
-                    await self.engine.create_instance(spec_copy, devices=dev_map, extra_config=extra_config)
-                    create_sec = time.perf_counter() - t_create
-                    created_instances.append(full_inst_name)
-
-                    # Inject network configurations
-                    t_push = time.perf_counter()
-                    networkd_conf = render_networkd_conf(ip=ip_addr, gateway=gateway_ip)
-                    await self.engine.push_file(
-                        full_inst_name,
-                        "/etc/systemd/network/10-eth0.network",
-                        networkd_conf,
-                        mode="0644",
-                    )
-
-                    interfaces_conf = render_interfaces_conf(ip=ip_addr, gateway=gateway_ip)
-                    await self.engine.push_file(
-                        full_inst_name,
-                        "/etc/network/interfaces",
-                        interfaces_conf,
-                        mode="0644",
-                    )
-
-                    await self.engine.push_file(
-                        full_inst_name,
-                        "/etc/hostname",
-                        f"{c.name}\n",
-                        mode="0644",
-                    )
-                    push_sec = time.perf_counter() - t_push
-
-                    # Start instance
-                    logger.info("Starting container '%s'", full_inst_name)
-                    t_start = time.perf_counter()
-                    await self.engine.start_instance(full_inst_name)
-                    start_sec = time.perf_counter() - t_start
-
-                    t_net = time.perf_counter()
-                    try:
-                        await self.engine.exec_command(full_inst_name, ip.addr_replace(f"{ip_addr}/24", "eth0"))
-                        await self.engine.exec_command(full_inst_name, ip.link_up("eth0"))
-                        await self.engine.exec_command(full_inst_name, ip.route_replace_default(gateway_ip, "eth0"))
-                    except Exception as net_err:
-                        logger.warning("Could not apply immediate runtime IP to %s: %s", full_inst_name, net_err)
-                    runtime_net_sec = time.perf_counter() - t_net
-
-                    t_db = time.perf_counter()
-                    await self.db.record_container(
-                        instance_name=full_inst_name,
-                        team_k=team_k,
-                        spec_name=c.name,
-                        ip_address=ip_addr,
-                        image_alias=c.image,
-                    )
-                    db_record_sec = time.perf_counter() - t_db
-
-                    container_timings.append({
-                        "container": c.name,
-                        "create_sec": round(create_sec, 4),
-                        "push_sec": round(push_sec, 4),
-                        "start_sec": round(start_sec, 4),
-                        "runtime_net_sec": round(runtime_net_sec, 4),
-                        "db_record_sec": round(db_record_sec, 4),
-                        "total_container_sec": round(time.perf_counter() - c_t0, 4),
-                    })
+                if config.containers:
+                    results = await asyncio.gather(*[_deploy_single(c) for c in config.containers])
+                    container_timings = [r for r in results if r is not None]
 
                 team_containers = await self.db.list_team_containers(team_k)
                 now_dt = datetime.now(timezone.utc)
@@ -281,7 +292,6 @@ class ChallengeService:
                     deployed_at=now_dt,
                     updated_at=now_dt,
                     containers=team_containers,
-                    instances=team_containers,
                     step_timings=step_timings,
                 )
 
@@ -338,6 +348,7 @@ class ChallengeService:
 
     async def verify_challenge(self, team_k: int, config: ChallengeConfig) -> VerifyResultResp:
         """Executes verification against dark OVN sandbox clones with readiness checks."""
+        config = config.render_for_team(team_k)
         try:
             async with self.locks.acquire("verify", str(team_k), timeout=0.01):
                 async with self.locks.lock_team(team_k, timeout=10.0):
