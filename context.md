@@ -152,3 +152,25 @@ docker compose up -d
 # Test complete flow: login, admin dashboard, challenge creation API, types endpoint
 python3 /home/debian/bluectfd/test_ui_fix.py
 ```
+
+---
+
+## BlueAgent Hardening & Optimization Changelog (October 2026)
+
+- **Reliability & Concurrency (L1–L6)**:
+  - **L1**: Lifespan startup reconciliation in `main.py` restores `br-team-k`, `wg-k` WireGuard peers from SQLite, restarts stopped containers, and reapplies runtime IPs.
+  - **L2**: `LifecycleManager` checks `locks.is_verify_locked(team_k)` before purging OVN switches, eliminating verification race conditions.
+  - **L3**: Immediate clone registration in `self.clones` prevents CoW zombie containers upon partial failure.
+  - **L4**: Deterministic single execution on `verify_commands` (no more blind 3x loop).
+  - **L5**: Dynamic OVN NAT and uplink configuration respecting `config.verify_internet_access`.
+  - **L6**: Concurrency fix in `LockRegistry` preventing timeout mutation on shared locks.
+- **Performance & I/O (P1–P4)**:
+  - **P1**: Parallelized container deploy, teardown, and OVN clone provisioning via `asyncio.gather`.
+  - **P2**: Added `capture_output: bool = True` to `incus exec`, dropping HTTP roundtrips from 6 to 2 per network command when output capture is unneeded.
+  - **P4**: Switched `SubprocessRunner` from disk tempfiles to in-memory async pipes (`communicate(input=stdin)`), eliminating disk I/O and securing keys.
+- **Client & Usability**:
+  - Native template placeholder rendering (`{{team_k}}`, `{{subnet}}`, `{{verifier_ip}}`, `{{ip:<name>}}`) directly in BlueAgent.
+  - Clean `DELETE /teams/{team_k}/machines?containers=web,db` query params support.
+  - Dynamic host IP detection in `start_services.sh` from interface `enp0s3`.
+- **Unit Test Coverage**:
+  - 111 passed tests (`pytest tests/test_*.py -v`).
