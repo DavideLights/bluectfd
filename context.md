@@ -50,7 +50,8 @@
 ### 2. Challenge Schema Changes -> IaC Engine Sync
 - If modifying `ChallengeConfig` schema in `blueagent/src/blueagent/models.py`:
   - Update `validate_spec_structure()` in `CTFd/CTFd/plugins/blueagent/spec.py`.
-  - Update template placeholders in `render_spec_for_team()` (`{{team_k}}`, `{{ip:<name>}}`).
+  - Note: BlueAgent natively renders all template placeholders (`{{team_k}}`, `{{subnet}}`, `{{verifier_ip}}`, `{{ip:<name>}}`) at deploy and verification time; client-side rendering is transparently accepted but no longer required.
+  - Teardown endpoint `DELETE /teams/{team_k}/machines` supports query parameter `?containers=web,db` without requiring a DELETE request body.
   - Update UI create/update modals: `assets/create.html` and `assets/create.js`.
 
 ### 3. Verification Contract Sync
