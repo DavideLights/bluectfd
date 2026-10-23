@@ -41,22 +41,21 @@ def check_and_set_cooldown(team_k: int, challenge_id: int, cooldown_seconds: int
     cache = _get_cache()
     now = time.time()
 
-    if cache and hasattr(cache, "add"):
-        # Try atomic add in cache (supported by Redis and Memcached)
-        expiry_ts = now + cooldown_seconds
-        added = cache.add(key, expiry_ts, timeout=cooldown_seconds)
-        if added:
+    if cache:
+        try:
+            val = cache.get(key)
+            if val is not None:
+                try:
+                    remaining = float(val) - now
+                    if remaining > 0:
+                        return False, max(1, int(remaining))
+                except (ValueError, TypeError):
+                    pass
+            # Key does not exist or has expired
+            cache.set(key, now + cooldown_seconds, timeout=cooldown_seconds)
             return True, 0
-
-        # Key already existed; fetch remaining time
-        val = cache.get(key)
-        if val is not None:
-            try:
-                rem = max(1, int(float(val) - now))
-                return False, rem
-            except (ValueError, TypeError):
-                pass
-        return False, cooldown_seconds
+        except Exception as err:
+            logger.debug("Cache cooldown check failed, using fallback: %s", err)
 
     # Fallback to local memory dictionary
     with _local_lock:

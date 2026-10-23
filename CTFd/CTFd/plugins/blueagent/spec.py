@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import yaml
 
 # Regex patterns
-RE_CHALLENGE_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_\-\.]{0,63}$")
+RE_CHALLENGE_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,24}$")
 RE_CONTAINER_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,20}$")
 RE_LIMITS_MEM = re.compile(r"^\d+(MB|GB)$", re.IGNORECASE)
 RE_PLACEHOLDER = re.compile(r"\{\{\s*([a-zA-Z0-9_\-:]+)\s*\}\}")
@@ -58,7 +58,7 @@ def validate_spec_structure(spec: Dict[str, Any]) -> Tuple[List[str], List[int]]
     chal_id = str(spec.get("challenge_id", "")).strip()
     if not chal_id or not RE_CHALLENGE_ID.match(chal_id):
         raise SpecValidationError(
-            f"Invalid 'challenge_id': '{chal_id}'. Must be 1-64 alphanumeric characters, underscores, or dashes."
+            f"Invalid 'challenge_id': '{chal_id}'. Must be 1-25 lowercase alphanumeric characters or hyphens."
         )
 
     # Validate verifier

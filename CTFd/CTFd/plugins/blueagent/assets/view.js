@@ -105,6 +105,39 @@
         });
     });
 
+    // Delegate click on Teardown Challenge
+    $(document).off("click.blueagent", "#btn-teardown-env").on("click.blueagent", "#btn-teardown-env", function () {
+        const challengeId = parseInt($("#challenge-id").val())
+            || (window.CTFd && window.CTFd._internal && window.CTFd._internal.challenge && window.CTFd._internal.challenge.data && window.CTFd._internal.challenge.data.id)
+            || (window.Alpine && window.Alpine.store("challenge") && window.Alpine.store("challenge").data && window.Alpine.store("challenge").data.id);
+        if (!challengeId) return;
+
+        const $btn = $(this);
+        $btn.prop("disabled", true).text("Tearing down...");
+
+        const csrf = (window.init && window.init.csrfNonce) || (window.CTFd && window.CTFd.config && window.CTFd.config.csrfNonce) || "";
+        fetch(`/api/v1/plugins/blueagent/challenges/${challengeId}/teardown`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "CSRF-Token": csrf
+            }
+        })
+        .then(res => res.json())
+        .then(data => {
+            $btn.prop("disabled", false).text("⏹ Teardown Challenge");
+            if (data.success) {
+                loadPlayerStatus(challengeId);
+            } else {
+                alert("Failed to teardown challenge: " + (data.message || "Unknown error"));
+            }
+        })
+        .catch(err => {
+            $btn.prop("disabled", false).text("⏹ Teardown Challenge");
+            alert("Network error tearing down challenge: " + err);
+        });
+    });
+
     function loadPlayerStatus(challengeId) {
         fetch(`/api/v1/plugins/blueagent/status?challenge_id=${challengeId}`)
             .then(res => res.json())
@@ -130,11 +163,14 @@
                 }
 
                 // Check deployment status
+                $("#deploy-controls").show();
+                $("#deploy-status-label").text(`Status: ${data.deployment_status}`);
                 if (data.deployment_status === "running") {
-                    $("#deploy-controls").hide();
+                    $("#btn-start-env").hide();
+                    $("#btn-teardown-env").show();
                 } else {
-                    $("#deploy-controls").show();
-                    $("#deploy-status-label").text(`Status: ${data.deployment_status}`);
+                    $("#btn-teardown-env").hide();
+                    $("#btn-start-env").show();
                 }
 
                 // If already solved
@@ -231,7 +267,7 @@
         $("#verify-failed-message").text(msg || "Verification checks failed.");
         $("#blueagent-verify-container").removeClass("testing passed busy").addClass("failed");
 
-        if (details && (details.readiness || details.verification)) {
+        if (details && Object.keys(details).length > 0) {
             $("#verify-failed-details-content").text(JSON.stringify(details, null, 2));
             $("#verify-failed-details").show();
         } else {

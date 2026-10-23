@@ -155,9 +155,21 @@ class BlueAgentTestClient:
         async with self._client() as c:
             return await c.request("DELETE", url, headers=self.headers, json=payload_copy)
 
-    async def verify_challenge(self, team_k: int, config_payload: Dict[str, Any]) -> httpx.Response:
+    async def verify_challenge(self, team_k: int, config_payload: Dict[str, Any], skip_cleanup: bool = False) -> httpx.Response:
         """Runs automated verification in dark OVN sandbox clones for team k."""
         payload_copy = dict(config_payload)
         payload_copy.pop("team_k", None)
+        url = f"/teams/{team_k}/verificator"
+        if skip_cleanup:
+            url += "?skip_cleanup=true"
         async with self._client() as c:
-            return await c.post(f"/teams/{team_k}/verificator", headers=self.headers, json=payload_copy)
+            return await c.post(url, headers=self.headers, json=payload_copy)
+
+    async def cleanup_verify(self, team_k: int, config_payload: Optional[Dict[str, Any]] = None) -> httpx.Response:
+        """Cleans up ephemeral verify sandbox clones and OVN network for team k."""
+        payload_copy = dict(config_payload) if config_payload else None
+        if payload_copy:
+            payload_copy.pop("team_k", None)
+        async with self._client() as c:
+            return await c.request("DELETE", f"/teams/{team_k}/verificator", headers=self.headers, json=payload_copy)
+

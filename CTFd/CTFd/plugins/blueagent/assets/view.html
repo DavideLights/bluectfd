@@ -42,9 +42,12 @@
             </table>
         </div>
 
-        <div id="deploy-controls" class="mt-2 text-right" style="display: none;">
+        <div id="deploy-controls" class="mt-2 d-flex justify-content-between align-items-center" style="display: none;">
             <span class="text-muted mr-2" id="deploy-status-label"></span>
-            <button type="button" class="btn btn-warning btn-sm" id="btn-start-env">▶ Start Environment</button>
+            <div>
+                <button type="button" class="btn btn-warning btn-sm" id="btn-start-env">▶ Start Environment</button>
+                <button type="button" class="btn btn-danger btn-sm" id="btn-teardown-env" style="display: none;">⏹ Teardown Challenge</button>
+            </div>
         </div>
     </div>
 </div>
